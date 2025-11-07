@@ -3,6 +3,15 @@ set -euxo pipefail
 
 echo "==> Django Pre-Start Script"
 
+# Remove existing database for fresh start on each deploy
+echo "==> Removing existing database..."
+if [ -f "/app/persistent/db/db.sqlite3" ]; then
+    rm -f /app/persistent/db/db.sqlite3
+    echo "==> Database removed successfully"
+else
+    echo "==> No existing database found, creating new one"
+fi
+
 # Create persistent dirs
 /bin/mkdir -p /app/persistent/db
 /bin/mkdir -p /app/persistent/media
