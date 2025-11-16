@@ -126,12 +126,16 @@ body { background: var(--bg); color: var(--text); }
 .timeline { position:relative; height:36px; background:#0b1220; border:1px solid #23324b; border-radius:8px; display:flex; align-items:center; padding:0 6px; }
 .timeline__selection { position:absolute; top:0; bottom:0; background:rgba(79,70,229,0.25); border-left:2px solid var(--primary); border-right:2px solid var(--primary); pointer-events:none; }
 
-.range { -webkit-appearance:none; appearance:none; position:absolute; left:6px; right:6px; height:36px; background:transparent; }
+.range { -webkit-appearance:none; appearance:none; position:absolute; left:6px; right:6px; height:36px; background:transparent; touch-action: none; -webkit-tap-highlight-color: transparent; }
 .range::-webkit-slider-runnable-track { height:4px; background:#21314b; border-radius:999px; }
 .range::-moz-range-track { height:4px; background:#21314b; border-radius:999px; }
-.range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:14px; height:14px; border-radius:50%; background:var(--primary); border:2px solid #fff; margin-top:-5px; }
-.range::-moz-range-thumb { width:14px; height:14px; border-radius:50%; background:var(--primary); border:2px solid #fff; }
+.range::-webkit-slider-thumb { -webkit-appearance:none; appearance:none; width:18px; height:18px; border-radius:50%; background:var(--primary); border:2px solid #fff; margin-top:-7px; box-shadow: 0 0 0 2px rgba(79,70,229,0.25); }
+.range::-moz-range-thumb { width:18px; height:18px; border-radius:50%; background:var(--primary); border:2px solid #fff; box-shadow: 0 0 0 2px rgba(79,70,229,0.25); }
 
+.range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 4px rgba(79,70,229,0.35); }
+.range:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 4px rgba(79,70,229,0.35); }
+
+/* Keep z-ordering so end is above start only where they meet; since areas no longer overlap, both are accessible */
 .range--start { z-index:2; }
 .range--end { z-index:3; }
 

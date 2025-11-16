@@ -102,6 +102,18 @@ export const Home = () => {
   const startSec = useMemo(() => parseTimeToSeconds(start), [start]);
   const endSec = useMemo(() => parseTimeToSeconds(end), [end]);
 
+  const startPct = useMemo(() => {
+    if (!durationSec) return 0;
+    const s = Math.max(0, Math.min(startSec, Math.max(0, (endSec || durationSec) - 1)));
+    return (s / durationSec) * 100;
+  }, [startSec, endSec, durationSec]);
+
+  const endPct = useMemo(() => {
+    if (!durationSec) return 100;
+    const e = Math.max(startSec + 1, Math.min(endSec || durationSec, durationSec));
+    return (e / durationSec) * 100;
+  }, [startSec, endSec, durationSec]);
+
   const setStartFromCurrent = () => {
     if (!videoRef.current) return;
     const t = Math.floor(videoRef.current.currentTime || 0);
@@ -286,8 +298,8 @@ export const Home = () => {
                     <div
                       className="timeline__selection"
                       style={{
-                        left: `${(startSec / durationSec) * 100}%`,
-                        width: `${((Math.min(endSec, durationSec) - startSec) / durationSec) * 100}%`,
+                        left: `${Math.max(0, Math.min(100, startPct))}%`,
+                        width: `${Math.max(0, Math.min(100, endPct) - Math.max(0, Math.min(100, startPct)))}%`,
                       }}
                     />
                     {/* Ползунок начала */}
@@ -297,7 +309,9 @@ export const Home = () => {
                       min={0}
                       max={durationSec}
                       step={1}
+                      aria-label="Начало отрезка"
                       value={Math.min(startSec, Math.max(0, (endSec || durationSec) - 1))}
+                      style={{ right: `calc(6px + ${Math.max(0, 100 - Math.max(0, Math.min(100, endPct)))}%)` }}
                       onChange={(e) => {
                         const val = Math.max(0, Math.min(Number(e.target.value), Math.max(0, (endSec || durationSec) - 1)));
                         setStart(toHHMMSS(val));
@@ -311,7 +325,9 @@ export const Home = () => {
                       min={0}
                       max={durationSec}
                       step={1}
+                      aria-label="Конец отрезка"
                       value={Math.max(endSec, startSec + 1)}
+                      style={{ left: `calc(6px + ${Math.max(0, Math.min(100, startPct))}%)` }}
                       onChange={(e) => {
                         const raw = Number(e.target.value);
                         const clamped = Math.max(raw, startSec + 1);
