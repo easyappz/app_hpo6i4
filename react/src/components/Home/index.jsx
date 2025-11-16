@@ -13,9 +13,6 @@ async function getFFmpeg(setLoadingText) {
     ffmpegSingleton.on('log', ({ message }) => {
       // console.log(message);
     });
-    ffmpegSingleton.on('progress', ({ progress }) => {
-      // handled in component via setter passed by closure
-    });
     setLoadingText && setLoadingText('Загрузка ffmpeg...');
     await ffmpegSingleton.load();
   }
@@ -57,11 +54,11 @@ export const Home = () => {
   const [start, setStart] = useState('00:00:00');
   const [end, setEnd] = useState('00:00:00');
   const [downloadUrl, setDownloadUrl] = useState('');
+  const [durationSec, setDurationSec] = useState(0);
 
   const videoRef = useRef(null);
 
   useEffect(() => {
-    // Fetch API hello to show connectivity
     (async () => {
       try {
         const data = await getHello();
@@ -76,7 +73,10 @@ export const Home = () => {
 
   const onFileSelect = (e) => {
     setError('');
-    setDownloadUrl('');
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
+      setDownloadUrl('');
+    }
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     if (f.size > MAX_SIZE) {
@@ -92,20 +92,26 @@ export const Home = () => {
     setFile(f);
     setStart('00:00:00');
     setEnd('00:00:00');
+    setDurationSec(0);
   };
 
   const videoUrl = useMemo(() => (file ? URL.createObjectURL(file) : ''), [file]);
   useEffect(() => () => { if (videoUrl) URL.revokeObjectURL(videoUrl); }, [videoUrl]);
+  useEffect(() => () => { if (downloadUrl) URL.revokeObjectURL(downloadUrl); }, [downloadUrl]);
+
+  const startSec = useMemo(() => parseTimeToSeconds(start), [start]);
+  const endSec = useMemo(() => parseTimeToSeconds(end), [end]);
 
   const setStartFromCurrent = () => {
     if (!videoRef.current) return;
-    const t = videoRef.current.currentTime || 0;
-    setStart(toHHMMSS(t));
+    const t = Math.floor(videoRef.current.currentTime || 0);
+    setStart(toHHMMSS(Math.min(t, Math.max(0, (endSec || durationSec) - 1))));
   };
   const setEndFromCurrent = () => {
     if (!videoRef.current) return;
-    const t = videoRef.current.currentTime || 0;
-    setEnd(toHHMMSS(t));
+    const t = Math.floor(videoRef.current.currentTime || 0);
+    const clamp = Math.max(t, startSec + 1);
+    setEnd(toHHMMSS(clamp));
   };
   const resetTimes = () => {
     setStart('00:00:00');
@@ -115,25 +121,31 @@ export const Home = () => {
 
   const handleTrim = async () => {
     setError('');
-    setDownloadUrl('');
+    if (downloadUrl) {
+      URL.revokeObjectURL(downloadUrl);
+      setDownloadUrl('');
+    }
     if (!file) {
       setError('Сначала выберите видео.');
       return;
     }
-    const duration = Number(videoRef.current?.duration || 0);
-    const startSec = parseTimeToSeconds(start);
-    const endSec = parseTimeToSeconds(end);
 
-    if (duration > 0 && endSec === 0) {
-      // if user didn't set, consider full length
-      setError('Укажите конечное время обрезки.');
-      return;
+    const duration = durationSec || Number(videoRef.current?.duration || 0);
+    let sSec = startSec;
+    let eSec = endSec;
+
+    if (duration > 0 && eSec === 0) {
+      // Если конец не указан — берём всю длину
+      eSec = Math.ceil(duration);
+      setEnd(toHHMMSS(eSec));
     }
 
-    if (startSec < 0 || endSec <= 0 || (duration > 0 && (startSec >= duration || endSec > Math.ceil(duration))) || startSec >= endSec) {
+    if (sSec < 0 || eSec <= 0 || (duration > 0 && (sSec >= duration || eSec > Math.ceil(duration))) || sSec >= eSec) {
       setError('Неверные границы обрезки. Проверьте время начала и конца.');
       return;
     }
+
+    const tSec = eSec - sSec;
 
     setProcessing(true);
     setProgress(0);
@@ -141,8 +153,10 @@ export const Home = () => {
     try {
       const ffmpeg = await getFFmpeg(setLoadingText);
 
-      // Subscribe to progress for this run
-      const onProgress = ({ progress: p }) => setProgress(Math.max(0, Math.min(1, p || 0)));
+      const onProgress = (p) => {
+        const val = typeof p?.progress === 'number' ? p.progress : (typeof p?.ratio === 'number' ? p.ratio : 0);
+        setProgress(Math.max(0, Math.min(1, val)));
+      };
       ffmpeg.on('progress', onProgress);
 
       const originalName = file.name || 'input';
@@ -153,56 +167,64 @@ export const Home = () => {
       setLoadingText('Подготовка файла...');
       await ffmpeg.writeFile(inName, await fetchFile(file));
 
-      const ss = toHHMMSS(startSec);
-      const to = toHHMMSS(endSec);
+      const ss = toHHMMSS(sSec);
+      const td = toHHMMSS(tSec);
 
-      // Try fast trim (stream copy) only for MP4 inputs
+      // Попытка быстрого обрезания (copy) только для MP4
       const isMp4Input = inExt === 'mp4';
-      let args = [];
+      let executed = false;
 
       if (isMp4Input) {
-        args = ['-i', inName, '-ss', ss, '-to', to, '-c', 'copy', '-movflags', 'faststart', outName];
         try {
           setLoadingText('Обрезка (без перекодирования)...');
-          await ffmpeg.exec(args);
-        } catch (e) {
-          // Fallback to re-encode if stream copy fails
-          args = ['-i', inName, '-ss', ss, '-to', to, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', 'faststart', outName];
-          try {
-            setLoadingText('Перекодирование в MP4 (x264)...');
-            await ffmpeg.exec(args);
-          } catch (e2) {
-            // Final fallback: mpeg4 encoder
-            args = ['-i', inName, '-ss', ss, '-to', to, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'mpeg4', '-q:v', '3', '-c:a', 'aac', '-b:a', '128k', '-movflags', 'faststart', outName];
-            setLoadingText('Перекодирование в MP4 (fallback)...');
-            await ffmpeg.exec(args);
-          }
+          await ffmpeg.exec(['-ss', ss, '-i', inName, '-t', td, '-avoid_negative_ts', 'make_zero', '-c', 'copy', '-movflags', '+faststart', outName]);
+          executed = true;
+        } catch (_) {
+          executed = false;
         }
-      } else {
-        // Non-mp4 inputs: re-encode
-        args = ['-i', inName, '-ss', ss, '-to', to, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', 'faststart', outName];
+      }
+
+      if (!executed) {
+        // Перекодирование в MP4 (x264)
         try {
-          setLoadingText('Перекодирование в MP4...');
-          await ffmpeg.exec(args);
-        } catch (e3) {
-          // Fallback to mpeg4 encoder
-          args = ['-i', inName, '-ss', ss, '-to', to, '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-c:v', 'mpeg4', '-q:v', '3', '-c:a', 'aac', '-b:a', '128k', '-movflags', 'faststart', outName];
+          setLoadingText('Перекодирование в MP4 (x264)...');
+          await ffmpeg.exec([
+            '-ss', ss, '-i', inName, '-t', td,
+            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+            '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            outName
+          ]);
+          executed = true;
+        } catch (_) {
+          // Fallback на mpeg4
           setLoadingText('Перекодирование в MP4 (fallback)...');
-          await ffmpeg.exec(args);
+          await ffmpeg.exec([
+            '-ss', ss, '-i', inName, '-t', td,
+            '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2',
+            '-c:v', 'mpeg4', '-q:v', '3',
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            outName
+          ]);
         }
       }
 
       setLoadingText('Формирование файла...');
-      const data = await ffmpeg.readFile(outName);
+      const data = await ffmpeg.readFile(outName); // Uint8Array
 
-      // cleanup
+      // cleanup временных файлов
       try { await ffmpeg.deleteFile(inName); } catch (_) {}
       try { await ffmpeg.deleteFile(outName); } catch (_) {}
 
-      const blob = new Blob([data.buffer], { type: 'video/mp4' });
+      const blob = new Blob([data], { type: 'video/mp4' });
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
       setLoadingText('Готово');
+
+      // Автоматически показать предпросмотр результата
+      // (Ссылка для скачивания также доступна ниже)
     } catch (e) {
       console.error(e);
       setError('Произошла ошибка при обработке видео. Попробуйте другой файл или другие параметры.');
@@ -256,7 +278,7 @@ export const Home = () => {
                   </div>
                 </div>
               </div>
-              <div style={{display:'flex', gap:8, marginTop:12}}>
+              <div style={{display:'flex', gap:8, marginTop:12, flexWrap:'wrap'}}>
                 <button className="btn secondary" type="button" onClick={resetTimes}>Сбросить</button>
                 <button className="btn" type="button" onClick={handleTrim} disabled={!file || processing}>{processing ? 'Обрезаю...' : 'Обрезать и скачать MP4'}</button>
               </div>
@@ -269,6 +291,11 @@ export const Home = () => {
               {downloadUrl ? (
                 <div style={{marginTop:12}}>
                   <a className="btn" href={downloadUrl} download={buildDownloadName(file?.name || 'video')}>Скачать результат</a>
+                  <div style={{marginTop:12}}>
+                    <div className="video-wrap">
+                      <video className="video-el" src={downloadUrl} controls playsInline />
+                    </div>
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -277,7 +304,18 @@ export const Home = () => {
           <div style={{marginTop:16}}>
             <div className="video-wrap">
               {videoUrl ? (
-                <video className="video-el" ref={videoRef} src={videoUrl} controls playsInline />
+                <video
+                  className="video-el"
+                  ref={videoRef}
+                  src={videoUrl}
+                  controls
+                  playsInline
+                  onLoadedMetadata={() => {
+                    const dur = Math.floor(videoRef.current?.duration || 0);
+                    setDurationSec(dur);
+                    setEnd(dur > 0 ? toHHMMSS(dur) : '00:00:00');
+                  }}
+                />
               ) : (
                 <div style={{padding:32, textAlign:'center', color:'var(--muted)'}}>Предпросмотр видео появится после загрузки файла.</div>
               )}
