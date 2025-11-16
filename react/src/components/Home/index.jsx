@@ -278,6 +278,70 @@ export const Home = () => {
                   </div>
                 </div>
               </div>
+
+              {/* Визуальный таймлайн обрезки */}
+              {durationSec > 0 && (
+                <div style={{marginTop:12}}>
+                  <div className="timeline">
+                    <div
+                      className="timeline__selection"
+                      style={{
+                        left: `${(startSec / durationSec) * 100}%`,
+                        width: `${((Math.min(endSec, durationSec) - startSec) / durationSec) * 100}%`,
+                      }}
+                    />
+                    {/* Ползунок начала */}
+                    <input
+                      className="range range--start"
+                      type="range"
+                      min={0}
+                      max={durationSec}
+                      step={1}
+                      value={Math.min(startSec, Math.max(0, (endSec || durationSec) - 1))}
+                      onChange={(e) => {
+                        const val = Math.max(0, Math.min(Number(e.target.value), Math.max(0, (endSec || durationSec) - 1)));
+                        setStart(toHHMMSS(val));
+                        if (videoRef.current) videoRef.current.currentTime = val;
+                      }}
+                    />
+                    {/* Ползунок конца */}
+                    <input
+                      className="range range--end"
+                      type="range"
+                      min={0}
+                      max={durationSec}
+                      step={1}
+                      value={Math.max(endSec, startSec + 1)}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        const clamped = Math.max(raw, startSec + 1);
+                        const finalV = Math.min(clamped, durationSec);
+                        setEnd(toHHMMSS(finalV));
+                        if (videoRef.current) videoRef.current.currentTime = finalV;
+                      }}
+                    />
+                  </div>
+                  <div style={{display:'flex', justifyContent:'space-between', color:'var(--muted)', marginTop:6, fontSize:12}}>
+                    <span>{toHHMMSS(0)}</span>
+                    <span>{toHHMMSS(durationSec)}</span>
+                  </div>
+                  <div style={{display:'flex', gap:8, marginTop:8, flexWrap:'wrap'}}>
+                    <button
+                      className="btn secondary"
+                      type="button"
+                      onClick={() => {
+                        const v = videoRef.current; if (!v) return; v.currentTime = parseTimeToSeconds(start); v.play();
+                        const endAt = parseTimeToSeconds(end);
+                        const onTime = () => { if (v.currentTime >= endAt) { v.pause(); v.removeEventListener('timeupdate', onTime); } };
+                        v.addEventListener('timeupdate', onTime);
+                      }}
+                    >Воспроизвести выделенный отрезок</button>
+                    <button className="btn secondary" type="button" onClick={() => { if (videoRef.current) videoRef.current.currentTime = parseTimeToSeconds(start); }}>К началу отрезка</button>
+                    <button className="btn secondary" type="button" onClick={() => { if (videoRef.current) videoRef.current.currentTime = parseTimeToSeconds(end); }}>К концу отрезка</button>
+                  </div>
+                </div>
+              )}
+
               <div style={{display:'flex', gap:8, marginTop:12, flexWrap:'wrap'}}>
                 <button className="btn secondary" type="button" onClick={resetTimes}>Сбросить</button>
                 <button className="btn" type="button" onClick={handleTrim} disabled={!file || processing}>{processing ? 'Обрезаю...' : 'Обрезать и скачать MP4'}</button>
