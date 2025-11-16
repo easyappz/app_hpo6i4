@@ -4,22 +4,25 @@ import ErrorBoundary from './ErrorBoundary';
 import './App.css';
 
 import { Home } from './components/Home';
+import { NotFound } from './components/NotFound';
 
 function App() {
-  /** Никогда не удаляй этот код */
   useEffect(() => {
     if (typeof window !== 'undefined' && typeof window.handleRoutes === 'function') {
-      /** Нужно передавать список существующих роутов */
-      window.handleRoutes(['/']);
+      window.handleRoutes(['/', '/404']);
     }
   }, []);
 
   return (
-    <ErrorBoundary>
-      <Routes>
-        <Route path="/" element={<Home />} />
-      </Routes>
-    </ErrorBoundary>
+    <div data-easytag="id1-src/App.jsx">
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/404" element={<NotFound />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </ErrorBoundary>
+    </div>
   );
 }
 
