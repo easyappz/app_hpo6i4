@@ -44,11 +44,6 @@ function buildDownloadName(originalName) {
   return base + '_trim.mp4';
 }
 
-// UI sizing constants for slider overlap control
-const THUMB_PX = 18; // must match CSS thumb size
-const SIDE_PAD = 6;  // must match CSS .timeline padding
-const HALF_THUMB = Math.round(THUMB_PX / 2);
-
 export const Home = () => {
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
@@ -63,6 +58,7 @@ export const Home = () => {
   const [activeHandle, setActiveHandle] = useState(null); // 'start' | 'end' | null
 
   const videoRef = useRef(null);
+  const trackRef = useRef(null);
 
   useEffect(() => {
     (async () => {
@@ -120,17 +116,6 @@ export const Home = () => {
     return (e / durationSec) * 100;
   }, [startSec, endSec, durationSec]);
 
-  // Avoid overlapping clickable areas by adding a half-thumb buffer
-  const startStyleRight = useMemo(() => {
-    const blockPct = Math.max(0, 100 - Math.max(0, Math.min(100, endPct)));
-    return `calc(${SIDE_PAD}px + ${HALF_THUMB}px + ${blockPct}%)`;
-  }, [endPct]);
-
-  const endStyleLeft = useMemo(() => {
-    const blockPct = Math.max(0, Math.min(100, startPct));
-    return `calc(${SIDE_PAD}px + ${HALF_THUMB}px + ${blockPct}%)`;
-  }, [startPct]);
-
   const setStartFromCurrent = () => {
     if (!videoRef.current) return;
     const t = Math.floor(videoRef.current.currentTime || 0);
@@ -147,6 +132,62 @@ export const Home = () => {
     const dur = Math.floor(videoRef.current?.duration || 0);
     setEnd(dur > 0 ? toHHMMSS(dur) : '00:00:00');
   };
+
+  // Pointer helpers for overlay track
+  const secFromClientX = (clientX) => {
+    const el = trackRef.current;
+    if (!el || !durationSec) return 0;
+    const rect = el.getBoundingClientRect();
+    const ratio = (clientX - rect.left) / rect.width;
+    const clamped = Math.max(0, Math.min(1, ratio));
+    return Math.round(clamped * durationSec);
+  };
+
+  const handleStartChange = (val) => {
+    const clamped = Math.max(0, Math.min(Number(val), Math.max(0, (endSec || durationSec) - 1)));
+    setStart(toHHMMSS(clamped));
+    if (videoRef.current) videoRef.current.currentTime = clamped;
+  };
+
+  const handleEndChange = (val) => {
+    const raw = Number(val);
+    const clamped = Math.max(raw, startSec + 1);
+    const finalV = Math.min(clamped, durationSec);
+    setEnd(toHHMMSS(finalV));
+    if (videoRef.current) videoRef.current.currentTime = finalV;
+  };
+
+  const onTrackPointerDown = (e) => {
+    if (!durationSec) return;
+    const sec = secFromClientX(e.clientX);
+    const endVal = endSec || durationSec;
+    const distStart = Math.abs(sec - startSec);
+    const distEnd = Math.abs(sec - endVal);
+    if (distStart <= distEnd) {
+      setActiveHandle('start');
+      handleStartChange(sec);
+    } else {
+      setActiveHandle('end');
+      handleEndChange(sec);
+    }
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!activeHandle) return;
+    const onMove = (e) => {
+      const sec = secFromClientX(e.clientX);
+      if (activeHandle === 'start') handleStartChange(sec);
+      if (activeHandle === 'end') handleEndChange(sec);
+    };
+    const onUp = () => setActiveHandle(null);
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+    };
+  }, [activeHandle, durationSec, startSec, endSec]);
 
   const handleTrim = async () => {
     setError('');
@@ -258,20 +299,6 @@ export const Home = () => {
 
   const acceptAttr = useMemo(() => 'video/mp4,video/x-msvideo,video/quicktime,video/webm,video/x-matroska', []);
 
-  // Handlers shared for onChange/onInput for better responsiveness
-  const handleStartChange = (val) => {
-    const clamped = Math.max(0, Math.min(Number(val), Math.max(0, (endSec || durationSec) - 1)));
-    setStart(toHHMMSS(clamped));
-    if (videoRef.current) videoRef.current.currentTime = clamped;
-  };
-  const handleEndChange = (val) => {
-    const raw = Number(val);
-    const clamped = Math.max(raw, startSec + 1);
-    const finalV = Math.min(clamped, durationSec);
-    setEnd(toHHMMSS(finalV));
-    if (videoRef.current) videoRef.current.currentTime = finalV;
-  };
-
   return (
     <div data-easytag="id1-src/components/Home/index.jsx">
       <div className="container">
@@ -296,92 +323,16 @@ export const Home = () => {
             </div>
 
             <div>
-              <label style={{display:'block', marginBottom:8}}>Инструменты обрезки по времени</label>
-              <div style={{display:'grid', gridTemplateColumns:'1fr 1fr', gap:12}}>
-                <div>
-                  <div style={{marginBottom:6}}>Начало (чч:мм:сс)</div>
-                  <input className="time-input" value={start} onChange={(e)=>setStart(e.target.value)} placeholder="00:00:00" />
-                  <div style={{display:'flex', gap:8, marginTop:8}}>
-                    <button className="btn secondary" type="button" onClick={setStartFromCurrent}>Из текущего</button>
-                  </div>
-                </div>
-                <div>
-                  <div style={{marginBottom:6}}>Конец (чч:мм:сс)</div>
-                  <input className="time-input" value={end} onChange={(e)=>setEnd(e.target.value)} placeholder="00:00:00" />
-                  <div style={{display:'flex', gap:8, marginTop:8}}>
-                    <button className="btn secondary" type="button" onClick={setEndFromCurrent}>Из текущего</button>
-                  </div>
-                </div>
-              </div>
+              <label style={{display:'block', marginBottom:8}}>Инструменты обрезки</label>
 
-              {durationSec > 0 && (
-                <div style={{marginTop:12}}>
-                  <div className="timeline">
-                    <div
-                      className="timeline__selection"
-                      style={{
-                        left: `${Math.max(0, Math.min(100, startPct))}%`,
-                        width: `${Math.max(0, Math.min(100, endPct) - Math.max(0, Math.min(100, startPct)))}%`,
-                      }}
-                    />
-                    {/* Start handle */}
-                    <input
-                      className="range range--start"
-                      type="range"
-                      min={0}
-                      max={durationSec}
-                      step={1}
-                      aria-label="Начало отрезка"
-                      value={Math.min(startSec, Math.max(0, (endSec || durationSec) - 1))}
-                      style={{ right: startStyleRight, zIndex: activeHandle === 'start' ? 4 : 3 }}
-                      onMouseDown={() => setActiveHandle('start')}
-                      onTouchStart={() => setActiveHandle('start')}
-                      onMouseUp={() => setActiveHandle(null)}
-                      onTouchEnd={() => setActiveHandle(null)}
-                      onChange={(e) => handleStartChange(e.target.value)}
-                      onInput={(e) => handleStartChange(e.target.value)}
-                    />
-                    {/* End handle */}
-                    <input
-                      className="range range--end"
-                      type="range"
-                      min={0}
-                      max={durationSec}
-                      step={1}
-                      aria-label="Конец отрезка"
-                      value={Math.max(endSec, startSec + 1)}
-                      style={{ left: endStyleLeft, zIndex: activeHandle === 'end' ? 4 : 2 }}
-                      onMouseDown={() => setActiveHandle('end')}
-                      onTouchStart={() => setActiveHandle('end')}
-                      onMouseUp={() => setActiveHandle(null)}
-                      onTouchEnd={() => setActiveHandle(null)}
-                      onChange={(e) => handleEndChange(e.target.value)}
-                      onInput={(e) => handleEndChange(e.target.value)}
-                    />
-                  </div>
-                  <div style={{display:'flex', justifyContent:'space-between', color:'var(--muted)', marginTop:6, fontSize:12}}>
-                    <span>{toHHMMSS(0)}</span>
-                    <span>{toHHMMSS(durationSec)}</span>
-                  </div>
-                  <div style={{display:'flex', gap:8, marginTop:8, flexWrap:'wrap'}}>
-                    <button
-                      className="btn secondary"
-                      type="button"
-                      onClick={() => {
-                        const v = videoRef.current; if (!v) return; v.currentTime = parseTimeToSeconds(start); v.play();
-                        const endAt = parseTimeToSeconds(end);
-                        const onTime = () => { if (v.currentTime >= endAt) { v.pause(); v.removeEventListener('timeupdate', onTime); } };
-                        v.addEventListener('timeupdate', onTime);
-                      }}
-                    >Воспроизвести выделенный отрезок</button>
-                    <button className="btn secondary" type="button" onClick={() => { if (videoRef.current) videoRef.current.currentTime = parseTimeToSeconds(start); }}>К началу отрезка</button>
-                    <button className="btn secondary" type="button" onClick={() => { if (videoRef.current) videoRef.current.currentTime = parseTimeToSeconds(end); }}>К концу отрезка</button>
-                  </div>
-                </div>
-              )}
-
-              <div style={{display:'flex', gap:8, marginTop:12, flexWrap:'wrap'}}>
+              <div style={{marginTop:12, display:'flex', gap:8, flexWrap:'wrap'}}>
                 <button className="btn secondary" type="button" onClick={resetTimes}>Сбросить</button>
+                <button className="btn secondary" type="button" onClick={() => {
+                  const v = videoRef.current; if (!v) return; v.currentTime = parseTimeToSeconds(start); v.play();
+                  const endAt = parseTimeToSeconds(end) || durationSec;
+                  const onTime = () => { if (v.currentTime >= endAt) { v.pause(); v.removeEventListener('timeupdate', onTime); } };
+                  v.addEventListener('timeupdate', onTime);
+                }}>Воспроизвести выделенный отрезок</button>
                 <button className="btn" type="button" onClick={handleTrim} disabled={!file || processing}>{processing ? 'Обрезаю...' : 'Обрезать и скачать MP4'}</button>
               </div>
               {loadingText || processing ? (
@@ -406,18 +357,50 @@ export const Home = () => {
           <div style={{marginTop:16}}>
             <div className="video-wrap">
               {videoUrl ? (
-                <video
-                  className="video-el"
-                  ref={videoRef}
-                  src={videoUrl}
-                  controls
-                  playsInline
-                  onLoadedMetadata={() => {
-                    const dur = Math.floor(videoRef.current?.duration || 0);
-                    setDurationSec(dur);
-                    setEnd(dur > 0 ? toHHMMSS(dur) : '00:00:00');
-                  }}
-                />
+                <>
+                  <video
+                    className="video-el"
+                    ref={videoRef}
+                    src={videoUrl}
+                    controls
+                    playsInline
+                    onLoadedMetadata={() => {
+                      const dur = Math.floor(videoRef.current?.duration || 0);
+                      setDurationSec(dur);
+                      setStart('00:00:00');
+                      setEnd(dur > 0 ? toHHMMSS(dur) : '00:00:00');
+                    }}
+                  />
+                  {durationSec > 0 && (
+                    <div className="video-overlay">
+                      <div ref={trackRef} className="overlay-track" onPointerDown={onTrackPointerDown}>
+                        <div
+                          className="overlay-selection"
+                          style={{
+                            left: `${Math.max(0, Math.min(100, startPct))}%`,
+                            width: `${Math.max(0, Math.min(100, endPct) - Math.max(0, Math.min(100, startPct)))}%`,
+                          }}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Начало отрезка"
+                          className="overlay-handle start"
+                          style={{ left: `${Math.max(0, Math.min(100, startPct))}%` }}
+                          onPointerDown={() => setActiveHandle('start')}
+                        />
+                        <button
+                          type="button"
+                          aria-label="Конец отрезка"
+                          className="overlay-handle end"
+                          style={{ left: `${Math.max(0, Math.min(100, endPct))}%` }}
+                          onPointerDown={() => setActiveHandle('end')}
+                        />
+                        <div className="overlay-time overlay-time--start" style={{ left: `${Math.max(0, Math.min(100, startPct))}%` }}>{toHHMMSS(startSec)}</div>
+                        <div className="overlay-time overlay-time--end" style={{ left: `${Math.max(0, Math.min(100, endPct))}%` }}>{toHHMMSS(endSec || durationSec)}</div>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : (
                 <div style={{padding:32, textAlign:'center', color:'var(--muted)'}}>Предпросмотр видео появится после загрузки файла.</div>
               )}
@@ -426,7 +409,11 @@ export const Home = () => {
         </div>
 
         <div style={{marginTop:12}} className="footer-note">
-          Советы: установите Начало и Конец с помощью кнопок «Из текущего» во время просмотра видео.
+          Советы: двигайте маркеры на дорожке поверх видео. Можно также выставить маркеры из текущей позиции воспроизведения с помощью кнопок ниже.
+          <div style={{display:'flex', gap:8, marginTop:8}}>
+            <button className="btn secondary" type="button" onClick={setStartFromCurrent}>Начало = из текущего</button>
+            <button className="btn secondary" type="button" onClick={setEndFromCurrent}>Конец = из текущего</button>
+          </div>
         </div>
       </div>
     </div>
