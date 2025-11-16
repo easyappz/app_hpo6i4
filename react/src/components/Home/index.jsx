@@ -44,6 +44,11 @@ function buildDownloadName(originalName) {
   return base + '_trim.mp4';
 }
 
+// UI sizing constants for slider overlap control
+const THUMB_PX = 18; // must match CSS thumb size
+const SIDE_PAD = 6;  // must match CSS .timeline padding
+const HALF_THUMB = Math.round(THUMB_PX / 2);
+
 export const Home = () => {
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
@@ -55,6 +60,7 @@ export const Home = () => {
   const [end, setEnd] = useState('00:00:00');
   const [downloadUrl, setDownloadUrl] = useState('');
   const [durationSec, setDurationSec] = useState(0);
+  const [activeHandle, setActiveHandle] = useState(null); // 'start' | 'end' | null
 
   const videoRef = useRef(null);
 
@@ -114,6 +120,17 @@ export const Home = () => {
     return (e / durationSec) * 100;
   }, [startSec, endSec, durationSec]);
 
+  // Avoid overlapping clickable areas by adding a half-thumb buffer
+  const startStyleRight = useMemo(() => {
+    const blockPct = Math.max(0, 100 - Math.max(0, Math.min(100, endPct)));
+    return `calc(${SIDE_PAD}px + ${HALF_THUMB}px + ${blockPct}%)`;
+  }, [endPct]);
+
+  const endStyleLeft = useMemo(() => {
+    const blockPct = Math.max(0, Math.min(100, startPct));
+    return `calc(${SIDE_PAD}px + ${HALF_THUMB}px + ${blockPct}%)`;
+  }, [startPct]);
+
   const setStartFromCurrent = () => {
     if (!videoRef.current) return;
     const t = Math.floor(videoRef.current.currentTime || 0);
@@ -147,7 +164,6 @@ export const Home = () => {
     let eSec = endSec;
 
     if (duration > 0 && eSec === 0) {
-      // Если конец не указан — берём всю длину
       eSec = Math.ceil(duration);
       setEnd(toHHMMSS(eSec));
     }
@@ -182,7 +198,6 @@ export const Home = () => {
       const ss = toHHMMSS(sSec);
       const td = toHHMMSS(tSec);
 
-      // Попытка быстрого обрезания (copy) только для MP4
       const isMp4Input = inExt === 'mp4';
       let executed = false;
 
@@ -197,7 +212,6 @@ export const Home = () => {
       }
 
       if (!executed) {
-        // Перекодирование в MP4 (x264)
         try {
           setLoadingText('Перекодирование в MP4 (x264)...');
           await ffmpeg.exec([
@@ -210,7 +224,6 @@ export const Home = () => {
           ]);
           executed = true;
         } catch (_) {
-          // Fallback на mpeg4
           setLoadingText('Перекодирование в MP4 (fallback)...');
           await ffmpeg.exec([
             '-ss', ss, '-i', inName, '-t', td,
@@ -224,9 +237,8 @@ export const Home = () => {
       }
 
       setLoadingText('Формирование файла...');
-      const data = await ffmpeg.readFile(outName); // Uint8Array
+      const data = await ffmpeg.readFile(outName);
 
-      // cleanup временных файлов
       try { await ffmpeg.deleteFile(inName); } catch (_) {}
       try { await ffmpeg.deleteFile(outName); } catch (_) {}
 
@@ -234,9 +246,6 @@ export const Home = () => {
       const url = URL.createObjectURL(blob);
       setDownloadUrl(url);
       setLoadingText('Готово');
-
-      // Автоматически показать предпросмотр результата
-      // (Ссылка для скачивания также доступна ниже)
     } catch (e) {
       console.error(e);
       setError('Произошла ошибка при обработке видео. Попробуйте другой файл или другие параметры.');
@@ -248,6 +257,20 @@ export const Home = () => {
   };
 
   const acceptAttr = useMemo(() => 'video/mp4,video/x-msvideo,video/quicktime,video/webm,video/x-matroska', []);
+
+  // Handlers shared for onChange/onInput for better responsiveness
+  const handleStartChange = (val) => {
+    const clamped = Math.max(0, Math.min(Number(val), Math.max(0, (endSec || durationSec) - 1)));
+    setStart(toHHMMSS(clamped));
+    if (videoRef.current) videoRef.current.currentTime = clamped;
+  };
+  const handleEndChange = (val) => {
+    const raw = Number(val);
+    const clamped = Math.max(raw, startSec + 1);
+    const finalV = Math.min(clamped, durationSec);
+    setEnd(toHHMMSS(finalV));
+    if (videoRef.current) videoRef.current.currentTime = finalV;
+  };
 
   return (
     <div data-easytag="id1-src/components/Home/index.jsx">
@@ -291,7 +314,6 @@ export const Home = () => {
                 </div>
               </div>
 
-              {/* Визуальный таймлайн обрезки */}
               {durationSec > 0 && (
                 <div style={{marginTop:12}}>
                   <div className="timeline">
@@ -302,7 +324,7 @@ export const Home = () => {
                         width: `${Math.max(0, Math.min(100, endPct) - Math.max(0, Math.min(100, startPct)))}%`,
                       }}
                     />
-                    {/* Ползунок начала */}
+                    {/* Start handle */}
                     <input
                       className="range range--start"
                       type="range"
@@ -311,14 +333,15 @@ export const Home = () => {
                       step={1}
                       aria-label="Начало отрезка"
                       value={Math.min(startSec, Math.max(0, (endSec || durationSec) - 1))}
-                      style={{ right: `calc(6px + ${Math.max(0, 100 - Math.max(0, Math.min(100, endPct)))}%)` }}
-                      onChange={(e) => {
-                        const val = Math.max(0, Math.min(Number(e.target.value), Math.max(0, (endSec || durationSec) - 1)));
-                        setStart(toHHMMSS(val));
-                        if (videoRef.current) videoRef.current.currentTime = val;
-                      }}
+                      style={{ right: startStyleRight, zIndex: activeHandle === 'start' ? 4 : 3 }}
+                      onMouseDown={() => setActiveHandle('start')}
+                      onTouchStart={() => setActiveHandle('start')}
+                      onMouseUp={() => setActiveHandle(null)}
+                      onTouchEnd={() => setActiveHandle(null)}
+                      onChange={(e) => handleStartChange(e.target.value)}
+                      onInput={(e) => handleStartChange(e.target.value)}
                     />
-                    {/* Ползунок конца */}
+                    {/* End handle */}
                     <input
                       className="range range--end"
                       type="range"
@@ -327,14 +350,13 @@ export const Home = () => {
                       step={1}
                       aria-label="Конец отрезка"
                       value={Math.max(endSec, startSec + 1)}
-                      style={{ left: `calc(6px + ${Math.max(0, Math.min(100, startPct))}%)` }}
-                      onChange={(e) => {
-                        const raw = Number(e.target.value);
-                        const clamped = Math.max(raw, startSec + 1);
-                        const finalV = Math.min(clamped, durationSec);
-                        setEnd(toHHMMSS(finalV));
-                        if (videoRef.current) videoRef.current.currentTime = finalV;
-                      }}
+                      style={{ left: endStyleLeft, zIndex: activeHandle === 'end' ? 4 : 2 }}
+                      onMouseDown={() => setActiveHandle('end')}
+                      onTouchStart={() => setActiveHandle('end')}
+                      onMouseUp={() => setActiveHandle(null)}
+                      onTouchEnd={() => setActiveHandle(null)}
+                      onChange={(e) => handleEndChange(e.target.value)}
+                      onInput={(e) => handleEndChange(e.target.value)}
                     />
                   </div>
                   <div style={{display:'flex', justifyContent:'space-between', color:'var(--muted)', marginTop:6, fontSize:12}}>

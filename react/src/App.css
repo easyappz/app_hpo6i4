@@ -140,3 +140,10 @@ body { background: var(--bg); color: var(--text); }
 .range--end { z-index:3; }
 
 .footer-note { color: var(--muted); font-size: 12px; }
+
+/* Prevent text selection while dragging sliders */
+.timeline { user-select: none; }
+
+/* Ensure start handle is not blocked initially */
+.range--start { z-index: 3; }
+.range--end { z-index: 2; }
