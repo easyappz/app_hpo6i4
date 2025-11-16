@@ -40,6 +40,13 @@ function parseTimeToSeconds(value) {
   return nums[0] * 3600 + nums[1] * 60 + nums[2];
 }
 
+function buildDownloadName(originalName) {
+  const name = originalName || 'video';
+  const dotIndex = name.lastIndexOf('.');
+  const base = dotIndex > 0 ? name.substring(0, dotIndex) : name;
+  return base + '_trim.mp4';
+}
+
 export const Home = () => {
   const [file, setFile] = useState(null);
   const [error, setError] = useState('');
@@ -261,7 +268,7 @@ export const Home = () => {
               ) : null}
               {downloadUrl ? (
                 <div style={{marginTop:12}}>
-                  <a className="btn" href={downloadUrl} download={(file?.name || 'video').replace(/\.[^.]+$/, '') + '_trim.mp4'}>Скачать результат</a>
+                  <a className="btn" href={downloadUrl} download={buildDownloadName(file?.name || 'video')}>Скачать результат</a>
                 </div>
               ) : null}
             </div>
